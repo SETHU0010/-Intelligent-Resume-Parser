@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resume Metadata Extractor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f6f9;
+            margin: 0;
+            padding: 0;
+            color: #333;
+        }
+
+        header {
+            background-color: #4CAF50;
+            color: white;
+            padding: 20px 0;
+            text-align: center;
+            font-size: 24px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 20px auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+        }
+
+        h2 {
+            color: #4CAF50;
+            text-align: center;
+        }
+
+        .upload-form {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .upload-form input[type="file"] {
+            display: none;
+        }
+
+        .upload-form label {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+
+        .upload-form label:hover {
+            background-color: #45a049;
+        }
+
+        .upload-form button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+            transition: background-color 0.3s;
+        }
+
+        .upload-form button:hover {
+            background-color: #45a049;
+        }
+
+        .results {
+            margin-top: 30px;
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 20px;
+            overflow-x: auto;
+        }
+
+        .results table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .results table th, .results table td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+        }
+
+        .results table th {
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 20px;
+            padding: 10px 0;
+            background-color: #f4f4f4;
+            border-top: 1px solid #ddd;
+            color: #555;
+        }
+
+        footer a {
+            color: #4CAF50;
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        Intelligent Resume Parser
+    </header>
+
+    <div class="container">
+        <h2>Upload Your Resume Files</h2>
+        <form class="upload-form" id="uploadForm" method="POST" enctype="multipart/form-data">
+            <label for="files">Choose Files</label>
+            <input type="file" id="files" name="files" multiple>
+            <br>
+            <button type="submit">Upload</button>
+        </form>
+
+        <div class="results" id="results" style="display: none;">
+            <h3>Extracted Metadata</h3>
+            <table id="resultsTable">
+                <thead>
+                    <tr>
+                        <th>File Name</th>
+                        <th>Metadata</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Results will be dynamically added here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <footer>
+        &copy; Intelligent Resume Parser
+        <span style="display:none;"></span> 
+    </footer>
+    
+
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const formData = new FormData();
+            const files = document.getElementById('files').files;
+
+            if (files.length === 0) {
+                alert('Please select at least one file to upload.');
+                return;
+            }
+
+            for (let i = 0; i < files.length; i++) {
+                formData.append('files', files[i]);
+            }
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                const resultsDiv = document.getElementById('results');
+                const resultsTable = document.getElementById('resultsTable').getElementsByTagName('tbody')[0];
+
+                resultsTable.innerHTML = '';
+
+                data.forEach(item => {
+                    const row = resultsTable.insertRow();
+                    const fileNameCell = row.insertCell(0);
+                    const metadataCell = row.insertCell(1);
+
+                    fileNameCell.textContent = item.filename;
+                    metadataCell.textContent = JSON.stringify(item.metadata, null, 2);
+                });
+
+                resultsDiv.style.display = 'block';
+            } catch (error) {
+                alert('Error uploading files: ' + error.message);
+            }
+        });
+    </script>
+</body>
+</html>
