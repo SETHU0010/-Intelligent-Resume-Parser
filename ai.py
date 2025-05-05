@@ -1,0 +1,229 @@
+import os
+import re
+from flask import Flask, request, render_template, jsonify, send_from_directory
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+from werkzeug.utils import secure_filename
+from docx import Document
+import PyPDF2
+import google.generativeai as genai
+
+# Configure Gemini API
+genai.configure(api_key="AIzaSyBChIHuCoikBLObEQlzIw4MXbtxEuf3Nkk")
+
+app = Flask(__name__)
+UPLOAD_FOLDER = 'Music/Internship/project -2/sethu/uploads'
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+ALLOWED_EXTENSIONS = {'pdf', 'docx'}
+
+# Load the sentence transformer model
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+# Function to check allowed file types
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# Functions for text extraction from files
+def extract_text_from_docx(docx_path):
+    doc = Document(docx_path)
+    return "\n".join([para.text for para in doc.paragraphs])
+
+def extract_text_from_pdf(pdf_path):
+    text = ""
+    with open(pdf_path, 'rb') as file:
+        reader = PyPDF2.PdfReader(file)
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+    return text
+
+def extract_text(file_path):
+    if file_path.lower().endswith('.docx'):
+        return extract_text_from_docx(file_path)
+    elif file_path.lower().endswith('.pdf'):
+        return extract_text_from_pdf(file_path)
+    else:
+        raise ValueError("Unsupported file format. Please provide a .docx or .pdf file.")
+
+# Define skills and keywords for extraction
+skills_dict = {
+    "front_end_skills": [
+        "HTML", "CSS", "JavaScript", "React", "Angular", "Vue", "TypeScript", "Responsive Web Design", 
+        "CSS Preprocessors", "Sass", "LESS", "Web Performance Optimization", "Cross-browser Compatibility", 
+        "UI/UX Design Principles", "Front-end Testing", "Jest", "Mocha", "Version Control", "Git"
+    ],
+    "back_end_skills": [
+        "Python", "Java", "Ruby", "PHP", "C#", "Node.js", "RESTful API Design", "GraphQL", 
+        "Server-Side Frameworks", "Express.js", "Django", "Flask", "Spring Boot", "Ruby on Rails", 
+        "Authentication", "Authorization", "JWT", "OAuth", "Microservices Architecture", "Serverless Computing", 
+        "Cloud Services", "AWS", "Azure", "Google Cloud", "Containerization", "Docker", "Kubernetes", 
+        "Database Integration", "Back-end Testing", "JUnit", "Mocha", "Postman"
+    ],
+    "database_skills": [
+        "Relational Databases", "MySQL", "PostgreSQL", "SQL Server", "Oracle", "NoSQL Databases", 
+        "MongoDB", "Cassandra", "CouchDB", "Firebase", "Database Design", "Normalization", "SQL Query Optimization", 
+        "Stored Procedures", "Triggers", "Database Indexing", "Data Modeling", "Data Migration", "ETL", 
+        "Backup and Recovery", "Distributed Databases"
+    ],
+    "ai_skills": [
+        "Machine Learning", "Supervised Learning", "Unsupervised Learning", "Reinforcement Learning", "Deep Learning", 
+        "Neural Networks", "CNNs", "RNNs", "Natural Language Processing", "NLP", "Computer Vision", "TensorFlow", 
+        "PyTorch", "Keras", "Data Preprocessing", "Feature Engineering", "Model Evaluation", "Hyperparameter Tuning", 
+        "AI Ethics", "AI Deployment", "ONNX", "TensorFlow Serving", "Reinforcement Learning Algorithms"
+    ],
+    "data_science_skills": [
+        "Data Analysis", "Pandas", "NumPy", "Data Visualization", "Matplotlib", "Seaborn", "Plotly", "Statistical Analysis", 
+        "Hypothesis Testing", "Regression", "Machine Learning", "Scikit-learn", "XGBoost", "Data Wrangling", 
+        "Time Series Analysis", "Big Data", "Hadoop", "Spark", "Data Pipelines", "Airflow", "Luigi", "SQL for Data Analysis", 
+        "A/B Testing", "Experimental Design", "Cloud-based Data Science Tools", "Google Colab", "Jupyter Notebooks"
+    ]
+}
+
+def extract_metadata(text):
+    metadata = {
+        "name": "",
+        "email": "",
+        "phone": "",
+        "years_experience": 0,
+        "front_end_skills": [],
+        "back_end_skills": [],
+        "database_skills": [],
+        "ai_skills": [],
+        "data_science_skills": [],
+        "location": "",
+        "projects": [],
+        "graduation": "",
+        "graduation_year": "",
+        "post_graduation": "",
+        "post_graduation_year": "",
+        "certifications": [],
+        "summary": ""  
+    }
+
+    # Extract Name
+    name_pattern = re.compile(r'^[A-Za-z]+(?: [A-Za-z]+)+')
+    name_match = name_pattern.search(text)
+    if name_match:
+        metadata["name"] = name_match.group(0)
+
+    # Extract Email
+    email_pattern = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b')
+    email_match = email_pattern.search(text)
+    if email_match:
+        metadata["email"] = email_match.group(0)
+
+    # Extract Phone Number
+    phone_pattern = re.compile(r'\+?\d{1,2}[-.\s]?\(?\d{1,3}?\)?[-.\s]?\d{3}[-.\s]?\d{4}')
+    phone_match = phone_pattern.search(text)
+    if phone_match:
+        metadata["phone"] = phone_match.group(0)
+
+    # Extract Years of Experience
+    experience_pattern = re.compile(r'(\d+)\s+year[s]? experience', re.IGNORECASE)
+    experience_match = experience_pattern.search(text)
+    if experience_match:
+        metadata["years_experience"] = int(experience_match.group(1))
+
+    # Extract Summary
+    summary_pattern = re.compile(r'(summary|professional summary|about me):?\s*([\s\S]+?)(\n[A-Z]|$)', re.IGNORECASE)
+    summary_match = summary_pattern.search(text)
+    if summary_match:
+        metadata["summary"] = summary_match.group(2).strip()
+
+    # Extract Skills (example subsets shown)
+    for skill in skills_dict["front_end_skills"]:
+        if skill.lower() in text.lower():
+            metadata["front_end_skills"].append(skill)
+    for skill in skills_dict["back_end_skills"]:
+        if skill.lower() in text.lower():
+            metadata["back_end_skills"].append(skill)
+    for skill in skills_dict["database_skills"]:
+        if skill.lower() in text.lower():
+            metadata["database_skills"].append(skill)
+    for skill in skills_dict["ai_skills"]:
+        if skill.lower() in text.lower():
+            metadata["ai_skills"].append(skill)
+    for skill in skills_dict["data_science_skills"]:
+        if skill.lower() in text.lower():
+            metadata["data_science_skills"].append(skill)
+
+    return metadata
+
+
+# Function to extract metadata using the Gemini API
+def extract_metadata_with_gemini(text):
+    # Generate metadata using Gemini model
+    prompt = f"Extract the following details from the resume text: Name, Email, Phone, Years of Experience, Skills (Front-end, Back-end, Database, AI, Data Science), Location, Projects, Graduation and Post-Graduation details, Certifications, summary.\n\nResume Text:\n{text}"
+    # Call the Gemini model to extract metadata
+    model = genai.GenerativeModel("gemini-1.5-pro")
+    response = model.generate_content(prompt,
+                                      generation_config=genai.GenerationConfig(
+                                           temperature = 0.0
+                                      ),)
+    
+    return response.text
+
+# Chunking function to divide text into smaller parts
+def chunk_text(text, max_length=128):
+    if not text:
+        raise ValueError("Text is empty or None, cannot chunk.")
+    
+    paragraphs = text.split("\n\n")
+    chunks = []
+    for paragraph in paragraphs:
+        words = paragraph.split()
+        for i in range(0, len(words), max_length):
+            chunk = " ".join(words[i:i + max_length])
+            chunks.append(chunk)
+    return chunks
+
+# Route to upload and process files
+@app.route('/')
+def index():
+    return render_template('result_ai.html')
+
+@app.route('/upload', methods=['POST'])
+def upload_files():
+    uploaded_files = request.files.getlist('files')
+
+    if len(uploaded_files) == 0:
+        return jsonify({'error': 'No files uploaded'}), 400
+
+    resume_texts = []
+    resume_files = []
+    metadata_list = []
+
+    for file in uploaded_files:
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(file_path)
+
+            try:
+                resume_text = extract_text(file_path)
+                if not resume_text:  # If text extraction fails
+                    return jsonify({'error': f"Failed to extract text from {filename}"}), 400
+                resume_texts.append(resume_text)
+                resume_files.append(filename)
+
+                # Try extracting metadata with Gemini, fallback to regex
+                try:
+                    metadata = extract_metadata_with_gemini(resume_text)
+                    if isinstance(metadata, str) and "error" in metadata:
+                        print(f"Gemini API error: {metadata}")
+                        metadata = extract_metadata(resume_text)
+                except Exception as e:
+                    print(f"Error using Gemini API: {str(e)}")
+                    metadata = extract_metadata(resume_text)
+                metadata_list.append({"filename": filename, "metadata": metadata})
+
+            except Exception as e:
+                return jsonify({'error': f"Error processing {filename}: {str(e)}"}), 400
+        else:
+            return jsonify({'error': 'Unsupported file format. Please upload .pdf or .docx files only.'}), 400
+    print(897,metadata_list)
+    return jsonify(metadata_list)
+
+if __name__ == '__main__':
+    if not os.path.exists(UPLOAD_FOLDER):
+        os.makedirs(UPLOAD_FOLDER)
+    app.run(debug=True)
