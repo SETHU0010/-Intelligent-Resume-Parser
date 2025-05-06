@@ -83,8 +83,9 @@ To build a web application that automates resume metadata extraction using Gemin
 - Regex extraction may lack accuracy
 - Security and privacy need attention for sensitive resume data
 
-✍️ Author
-Sethumadhavan V
-Email: sethumadhavanvelu2002@gmail.com
-GitHub: @SETHU0010
+## ✍️ Author
+
+**Sethumadhavan V**  
+📧 Email: [sethumadhavanvelu2002@gmail.com](mailto:sethumadhavanvelu2002@gmail.com)  
+🐙 GitHub: [@SETHU0010](https://github.com/SETHU0010)
 
