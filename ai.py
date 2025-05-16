@@ -1,29 +1,29 @@
 import os
 import re
-from flask import Flask, request, render_template, jsonify, send_from_directory
+import json
+from flask import Flask, request, render_template, jsonify
 from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
 from werkzeug.utils import secure_filename
 from docx import Document
 import PyPDF2
 import google.generativeai as genai
 
 # Configure Gemini API
-genai.configure(api_key="AIzaSyBChIHuCoikBLObEQlzIw4MXbtxEuf3Nkk")
+genai.configure(api_key="AIzaSyDvcBJWFC1feCLrdYL5SzccT1dbSTFRTRs")
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'Music/Internship/project -2/sethu/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 ALLOWED_EXTENSIONS = {'pdf', 'docx'}
 
-# Load the sentence transformer model
+# Load SentenceTransformer (currently unused but kept for future semantic tasks)
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
-# Function to check allowed file types
+# File format check
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# Functions for text extraction from files
+# Text extraction
 def extract_text_from_docx(docx_path):
     doc = Document(docx_path)
     return "\n".join([para.text for para in doc.paragraphs])
@@ -42,7 +42,7 @@ def extract_text(file_path):
     elif file_path.lower().endswith('.pdf'):
         return extract_text_from_pdf(file_path)
     else:
-        raise ValueError("Unsupported file format. Please provide a .docx or .pdf file.")
+        raise ValueError("Unsupported file format.")
 
 # Define skills and keywords for extraction
 skills_dict = {
@@ -78,6 +78,7 @@ skills_dict = {
     ]
 }
 
+# Regex-based metadata extraction
 def extract_metadata(text):
     metadata = {
         "name": "",
@@ -96,40 +97,30 @@ def extract_metadata(text):
         "post_graduation": "",
         "post_graduation_year": "",
         "certifications": [],
-        "summary": ""  
+        "summary": "",
+        "internships": []  # New field
     }
 
-    # Extract Name
     name_pattern = re.compile(r'^[A-Za-z]+(?: [A-Za-z]+)+')
-    name_match = name_pattern.search(text)
-    if name_match:
-        metadata["name"] = name_match.group(0)
-
-    # Extract Email
     email_pattern = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b')
-    email_match = email_pattern.search(text)
-    if email_match:
-        metadata["email"] = email_match.group(0)
-
-    # Extract Phone Number
     phone_pattern = re.compile(r'\+?\d{1,2}[-.\s]?\(?\d{1,3}?\)?[-.\s]?\d{3}[-.\s]?\d{4}')
-    phone_match = phone_pattern.search(text)
-    if phone_match:
-        metadata["phone"] = phone_match.group(0)
-
-    # Extract Years of Experience
     experience_pattern = re.compile(r'(\d+)\s+year[s]? experience', re.IGNORECASE)
-    experience_match = experience_pattern.search(text)
-    if experience_match:
-        metadata["years_experience"] = int(experience_match.group(1))
-
-    # Extract Summary
     summary_pattern = re.compile(r'(summary|professional summary|about me):?\s*([\s\S]+?)(\n[A-Z]|$)', re.IGNORECASE)
-    summary_match = summary_pattern.search(text)
-    if summary_match:
-        metadata["summary"] = summary_match.group(2).strip()
+    internship_pattern = re.compile(r'(internship|intern)\s+(at|with)?\s*([\w\s&.-]+)', re.IGNORECASE)
 
-    # Extract Skills (example subsets shown)
+    if name_match := name_pattern.search(text):
+        metadata["name"] = name_match.group(0)
+    if email_match := email_pattern.search(text):
+        metadata["email"] = email_match.group(0)
+    if phone_match := phone_pattern.search(text):
+        metadata["phone"] = phone_match.group(0)
+    if experience_match := experience_pattern.search(text):
+        metadata["years_experience"] = int(experience_match.group(1))
+    if summary_match := summary_pattern.search(text):
+        metadata["summary"] = summary_match.group(2).strip()
+    if internship_matches := internship_pattern.findall(text):
+        metadata["internships"] = list(set(match[2].strip() for match in internship_matches if match[2].strip()))
+
     for skill in skills_dict["front_end_skills"]:
         if skill.lower() in text.lower():
             metadata["front_end_skills"].append(skill)
@@ -148,25 +139,30 @@ def extract_metadata(text):
 
     return metadata
 
-
-# Function to extract metadata using the Gemini API
+# Gemini API metadata extraction
 def extract_metadata_with_gemini(text):
-    # Generate metadata using Gemini model
-    prompt = f"Extract the following details from the resume text: Name, Email, Phone, Years of Experience, Skills (Front-end, Back-end, Database, AI, Data Science), Location, Projects, Graduation and Post-Graduation details, Certifications, summary.\n\nResume Text:\n{text}"
-    # Call the Gemini model to extract metadata
-    model = genai.GenerativeModel("gemini-1.5-pro")
-    response = model.generate_content(prompt,
-                                      generation_config=genai.GenerationConfig(
-                                           temperature = 0.0
-                                      ),)
-    
-    return response.text
+    prompt = (
+        "Extract the following fields from the resume and return the result as a valid JSON object:\n"
+        "Name, Email, Phone, Years of Experience, Summary, Skills (Front-end, Back-end, Database, AI, Data Science),\n"
+        "Location, Projects, Graduation and Post-Graduation (with year), Certifications, and Internships (with company name).\n\n"
+        f"Resume Text:\n{text}"
+    )
 
-# Chunking function to divide text into smaller parts
+    model = genai.GenerativeModel("gemini-1.5-pro")
+    try:
+        response = model.generate_content(prompt,
+            generation_config=genai.GenerationConfig(temperature=0.0)
+        )
+        parsed = json.loads(response.text)
+        return parsed
+    except Exception as e:
+        print(f"Gemini parsing error: {e}")
+        return extract_metadata(text)  # Fallback
+
+# Chunking (not actively used yet)
 def chunk_text(text, max_length=128):
     if not text:
         raise ValueError("Text is empty or None, cannot chunk.")
-    
     paragraphs = text.split("\n\n")
     chunks = []
     for paragraph in paragraphs:
@@ -176,7 +172,7 @@ def chunk_text(text, max_length=128):
             chunks.append(chunk)
     return chunks
 
-# Route to upload and process files
+# Routes
 @app.route('/')
 def index():
     return render_template('result_ai.html')
@@ -188,8 +184,6 @@ def upload_files():
     if len(uploaded_files) == 0:
         return jsonify({'error': 'No files uploaded'}), 400
 
-    resume_texts = []
-    resume_files = []
     metadata_list = []
 
     for file in uploaded_files:
@@ -200,27 +194,21 @@ def upload_files():
 
             try:
                 resume_text = extract_text(file_path)
-                if not resume_text:  # If text extraction fails
+                if not resume_text:
                     return jsonify({'error': f"Failed to extract text from {filename}"}), 400
-                resume_texts.append(resume_text)
-                resume_files.append(filename)
 
-                # Try extracting metadata with Gemini, fallback to regex
                 try:
                     metadata = extract_metadata_with_gemini(resume_text)
-                    if isinstance(metadata, str) and "error" in metadata:
-                        print(f"Gemini API error: {metadata}")
-                        metadata = extract_metadata(resume_text)
                 except Exception as e:
-                    print(f"Error using Gemini API: {str(e)}")
+                    print(f"Fallback to regex: {str(e)}")
                     metadata = extract_metadata(resume_text)
-                metadata_list.append({"filename": filename, "metadata": metadata})
 
+                metadata_list.append({"filename": filename, "metadata": metadata})
             except Exception as e:
                 return jsonify({'error': f"Error processing {filename}: {str(e)}"}), 400
         else:
             return jsonify({'error': 'Unsupported file format. Please upload .pdf or .docx files only.'}), 400
-    print(897,metadata_list)
+
     return jsonify(metadata_list)
 
 if __name__ == '__main__':
